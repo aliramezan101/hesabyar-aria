@@ -160,4 +160,8 @@ if (fs.existsSync(clientDist)) {
   app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')))
 }
 
-app.listen(port, '0.0.0.0', () => console.log(`حسابیار آریا روی پورت ${port} فعال شد.`))
+if (process.env.VERCEL !== '1' && process.env.NETLIFY !== 'true') {
+  app.listen(port, '0.0.0.0', () => console.log(`حسابیار آریا روی پورت ${port} فعال شد.`))
+}
+
+export default app
