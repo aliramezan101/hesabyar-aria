@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-const dataDir = process.env.DATA_DIR || path.resolve(process.cwd(), 'data')
+const dataDir = process.env.DATA_DIR || (process.env.NETLIFY === 'true' ? '/tmp/hesabyar-aria-data' : path.resolve(process.cwd(), 'data'))
 fs.mkdirSync(dataDir, { recursive: true })
 
 const db = new DatabaseSync(path.join(dataDir, 'hesabyar-aria.db'))
