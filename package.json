@@ -1,0 +1,31 @@
+{
+  "name": "hesabyar-aria",
+  "version": "0.1.0",
+  "private": true,
+  "description": "حسابیار آریا؛ دفتر مالی برای معاملات خودرو، سرمایه‌گذاران، اقساط و چک‌ها",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "node server/index.js",
+    "client": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "check": "npm run build && node --check server/index.js && node --check server/db.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "lucide-react": "^0.468.0",
+    "recharts": "^2.15.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "vite": "^6.0.7"
+  }
+}
