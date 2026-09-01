@@ -119,6 +119,13 @@ app.post('/api/contacts', (req, res) => {
   db.prepare(`INSERT INTO contacts (id,name,type,phone,national_id,notes) VALUES (@id,@name,@type,@phone,@national_id,@notes)`).run(record)
   res.status(201).json(record)
 })
+app.patch('/api/contacts/:id', (req, res) => {
+  const body = req.body || {}
+  if (!body.name) return res.status(400).json({ error: 'نام شخص الزامی است.' })
+  const result = db.prepare(`UPDATE contacts SET name=?, type=?, phone=?, national_id=?, notes=? WHERE id=?`).run(String(body.name), String(body.type || 'customer'), String(body.phone || ''), String(body.national_id || ''), String(body.notes || ''), req.params.id)
+  if (!result.changes) return res.status(404).json({ error: 'شخص پیدا نشد.' })
+  res.json(db.prepare(`SELECT * FROM contacts WHERE id=?`).get(req.params.id))
+})
 
 app.get('/api/vehicles', (_req, res) => res.json(db.prepare(`SELECT vehicles.*, contacts.name AS customer_name FROM vehicles LEFT JOIN contacts ON contacts.id = vehicles.customer_id ORDER BY vehicles.created_at DESC`).all()))
 app.post('/api/vehicles', (req, res) => {
@@ -136,6 +143,13 @@ app.post('/api/investors', (req, res) => {
   const record = { id: nowId('investor'), name: String(body.name), principal_rial: safeInt(body.principal_rial), rate_percent: Number(body.rate_percent) || 0, status: String(body.status || 'active'), notes: String(body.notes || '') }
   db.prepare(`INSERT INTO investors (id,name,principal_rial,rate_percent,status,notes) VALUES (@id,@name,@principal_rial,@rate_percent,@status,@notes)`).run(record)
   res.status(201).json(record)
+})
+app.patch('/api/investors/:id', (req, res) => {
+  const body = req.body || {}
+  if (!body.name) return res.status(400).json({ error: 'نام سرمایه‌گذار الزامی است.' })
+  const result = db.prepare(`UPDATE investors SET name=?, principal_rial=?, rate_percent=?, status=?, notes=? WHERE id=?`).run(String(body.name), safeInt(body.principal_rial), Number(body.rate_percent) || 0, String(body.status || 'active'), String(body.notes || ''), req.params.id)
+  if (!result.changes) return res.status(404).json({ error: 'سرمایه‌گذار پیدا نشد.' })
+  res.json(db.prepare(`SELECT * FROM investors WHERE id=?`).get(req.params.id))
 })
 
 app.get('/api/installments', (_req, res) => res.json(db.prepare(`SELECT installments.*, contacts.name AS customer_name, vehicles.title AS vehicle_title FROM installments LEFT JOIN contacts ON contacts.id=installments.customer_id LEFT JOIN vehicles ON vehicles.id=installments.vehicle_id ORDER BY due_date ASC`).all()))
