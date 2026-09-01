@@ -53,6 +53,10 @@ const faCompact = new Intl.NumberFormat('fa-IR', { notation: 'compact', maximumF
 const money = (value, compact = false) => `${(compact ? faCompact : faNumber).format(Math.round(Number(value || 0)))} ریال`
 const dateLabel = (value) => String(value || '').replaceAll('-', '/')
 const today = '۱۴۰۵/۰۶/۰۹'
+const themeStorageKey = 'hesabyar-aria-theme-v1'
+const getInitialTheme = () => {
+  try { return window.localStorage.getItem(themeStorageKey) || 'light' } catch { return 'light' }
+}
 
 const isGithubPages = typeof window !== 'undefined' && window.location.hostname.endsWith('.github.io')
 const localStorageKey = 'hesabyar-aria-local-v1'
@@ -161,6 +165,18 @@ const localApi = async (url, options = {}) => {
     const record = { ...defaults, ...body, id: localId(type.slice(0, -1)), amount_rial: Math.max(0, Math.round(Number(body.amount_rial) || 0)), value_rial: Math.max(0, Math.round(Number(body.value_rial) || 0)), principal_rial: Math.max(0, Math.round(Number(body.principal_rial) || 0)), rate_percent: Number(body.rate_percent) || 0 }
     data[type].push(record); saveLocalData(data); return record
   }
+  if (path.startsWith('/api/contacts/') && options.method === 'PATCH') {
+    const id = path.split('/').pop(); const body = localBody(options); const item = data.contacts.find((row) => row.id === id)
+    if (!item) throw new Error('شخص پیدا نشد.')
+    Object.assign(item, { name: String(body.name || item.name), type: String(body.type || item.type), phone: String(body.phone || ''), national_id: String(body.national_id || ''), notes: String(body.notes || '') })
+    saveLocalData(data); return item
+  }
+  if (path.startsWith('/api/investors/') && options.method === 'PATCH') {
+    const id = path.split('/').pop(); const body = localBody(options); const item = data.investors.find((row) => row.id === id)
+    if (!item) throw new Error('سرمایه‌گذار پیدا نشد.')
+    Object.assign(item, { name: String(body.name || item.name), principal_rial: Math.max(0, Math.round(Number(body.principal_rial) || 0)), rate_percent: Number(body.rate_percent) || 0, status: String(body.status || item.status), notes: String(body.notes || '') })
+    saveLocalData(data); return item
+  }
   if (path === '/api/installments' && !options.method) return withJoins().installments
   if (path.startsWith('/api/installments/') && options.method === 'PATCH') {
     const id = path.split('/').pop(); const body = localBody(options); const item = data.installments.find((row) => row.id === id)
@@ -179,6 +195,11 @@ function App() {
   const [records, setRecords] = useState({ transactions: [], checks: [], contacts: [], vehicles: [], investors: [], installments: [] })
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [dateOpen, setDateOpen] = useState(false)
+  const [dateContext, setDateContext] = useState({ id: 'today', label: today })
+  const [theme, setTheme] = useState(getInitialTheme)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [notice, setNotice] = useState(null)
   const [search, setSearch] = useState('')
@@ -216,13 +237,16 @@ function App() {
 
   const currentTitle = navItems.find((item) => item.id === active)?.label || 'داشبورد'
   const go = (id) => { setActive(id); setMobileOpen(false) }
+  const openModal = (type, record = null) => setModal({ type, record })
   const submitModal = async (payload) => {
     try {
-      const endpoint = { transaction: '/api/transactions', check: '/api/checks', contact: '/api/contacts', vehicle: '/api/vehicles', investor: '/api/investors' }[modal]
-      await api(endpoint, { method: 'POST', body: JSON.stringify(payload) })
+      const type = modal.type
+      const baseEndpoint = { transaction: '/api/transactions', check: '/api/checks', contact: '/api/contacts', vehicle: '/api/vehicles', investor: '/api/investors' }[type]
+      const endpoint = modal.record ? `${baseEndpoint}/${modal.record.id}` : baseEndpoint
+      await api(endpoint, { method: modal.record ? 'PATCH' : 'POST', body: JSON.stringify(payload) })
       setModal(null)
       await refresh()
-      setNotice({ type: 'success', message: 'رکورد با موفقیت ثبت شد.' })
+      setNotice({ type: 'success', message: modal.record ? 'تغییرات با موفقیت ذخیره شد.' : 'رکورد با موفقیت ثبت شد.' })
     } catch (error) {
       setNotice({ type: 'error', message: error.message })
     }
@@ -233,6 +257,11 @@ function App() {
     const timer = window.setTimeout(() => setNotice(null), 4000)
     return () => window.clearTimeout(timer)
   }, [notice])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try { window.localStorage.setItem(themeStorageKey, theme) } catch { /* ignore storage failures */ }
+  }, [theme])
 
   if (auth.loading) return <div className="auth-loading"><div className="auth-loading-mark">A</div><span>در حال آماده‌سازی حسابیار آریا...</span></div>
   if (auth.locked) return <LockedScreen />
@@ -258,7 +287,7 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item"><Settings size={19} /><span>تنظیمات</span></button>
+          <button className="nav-item" onClick={() => setSettingsOpen(true)}><Settings size={19} /><span>تنظیمات</span></button>
           <div className="sidebar-divider" />
           <div className="workspace-status"><span className="status-dot" /> پایگاه محلی فعال</div>
           <small>واحد مرجع: ریال</small>
@@ -290,26 +319,31 @@ function App() {
               <p>{active === 'dashboard' ? 'نمایی سریع از نقدینگی، تعهدات و سررسیدهای شما' : pageDescription(active)}</p>
             </div>
             <div className="heading-actions">
-              <button className="date-control"><CalendarDays size={16} /> {today} <ChevronDown size={15} /></button>
-              <button className="primary-button" onClick={() => setModal('transaction')}><Plus size={18} /> ثبت تراکنش</button>
+              <div className="date-picker-wrap">
+                <button className="date-control" aria-expanded={dateOpen} onClick={() => setDateOpen((open) => !open)}><CalendarDays size={16} /> {dateContext.label} <ChevronDown size={15} /></button>
+                {dateOpen && <DateMenu selected={dateContext.id} onSelect={(option) => { setDateContext(option); setDateOpen(false); setNotice({ type: 'success', message: `بازهٔ ${option.label} انتخاب شد.` }) }} />}
+              </div>
+              <button className="primary-button" onClick={() => openModal('transaction')}><Plus size={18} /> ثبت تراکنش</button>
             </div>
           </div>
 
           {loading && <div className="loading-bar"><span /></div>}
           {notice && <div className={`notice ${notice.type}`}><span>{notice.message}</span><button onClick={() => setNotice(null)}><X size={16} /></button></div>}
 
-          {active === 'dashboard' && <Dashboard dashboard={dashboard} onOpen={setModal} />}
-          {active === 'ledger' && <Ledger transactions={records.transactions} search={search} onOpen={setModal} />}
-          {active === 'people' && <People contacts={records.contacts} onOpen={setModal} />}
-          {active === 'vehicles' && <Vehicles vehicles={records.vehicles} onOpen={setModal} />}
-          {active === 'checks' && <Checks checks={records.checks} onOpen={setModal} />}
+          {active === 'dashboard' && <Dashboard dashboard={dashboard} onOpen={openModal} />}
+          {active === 'ledger' && <Ledger transactions={records.transactions} search={search} onOpen={openModal} />}
+          {active === 'people' && <People contacts={records.contacts} onOpen={openModal} onOpenProfile={setProfile} />}
+          {active === 'vehicles' && <Vehicles vehicles={records.vehicles} onOpen={openModal} />}
+          {active === 'checks' && <Checks checks={records.checks} onOpen={openModal} />}
           {active === 'installments' && <Installments installments={records.installments} onRefresh={refresh} />}
-          {active === 'investors' && <Investors investors={records.investors} onOpen={setModal} />}
+          {active === 'investors' && <Investors investors={records.investors} onOpen={openModal} />}
           {active === 'reports' && <Reports dashboard={dashboard} records={records} />}
         </div>
       </main>
 
-      {modal && <Modal type={modal} onClose={() => setModal(null)} onSubmit={submitModal} />}
+      {modal && <Modal type={modal.type} record={modal.record} onClose={() => setModal(null)} onSubmit={submitModal} />}
+      {profile && <ContactProfile contact={profile} onClose={() => setProfile(null)} onEdit={() => { setProfile(null); openModal('contact', profile) }} />}
+      {settingsOpen && <SettingsPanel theme={theme} onThemeChange={setTheme} onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }
@@ -427,8 +461,8 @@ function Ledger({ transactions, search, onOpen }) {
   return <section className="panel page-panel"><PanelHeader title="دفتر کل" action={<button className="primary-button small" onClick={() => onOpen('transaction')}><Plus size={16} /> ثبت تراکنش</button>} /><div className="filter-row"><div className="filter-search"><Search size={16} /><span>{search || 'برای فیلتر از جست‌وجوی بالا استفاده کنید'}</span></div><button className="secondary-button"><CalendarDays size={16} /> بازه زمانی</button><button className="secondary-button"><ChevronDown size={16} /> همه وضعیت‌ها</button></div><TransactionTable transactions={filtered} /></section>
 }
 
-function People({ contacts, onOpen }) {
-  return <section className="panel page-panel"><PanelHeader title="اشخاص و طرف‌حساب‌ها" action={<button className="primary-button small" onClick={() => onOpen('contact')}><Plus size={16} /> شخص جدید</button>} /><div className="entity-grid">{contacts.map((item) => <div className="entity-card" key={item.id}><div className="entity-avatar"><UserRound size={20} /></div><div><strong>{item.name}</strong><span>{contactType(item.type)}</span><small>{item.phone || 'شماره ثبت نشده'}</small></div><ArrowLeft size={16} /></div>)}{!contacts.length && <EmptyState icon={UsersRound} text="شخصی ثبت نشده است" />}</div></section>
+function People({ contacts, onOpen, onOpenProfile }) {
+  return <section className="panel page-panel"><PanelHeader title="اشخاص و طرف‌حساب‌ها" action={<button className="primary-button small" onClick={() => onOpen('contact')}><Plus size={16} /> شخص جدید</button>} /><div className="entity-grid">{contacts.map((item) => <button type="button" className="entity-card" key={item.id} onClick={() => onOpenProfile(item)} aria-label={`مشاهده پروفایل ${item.name}`}><div className="entity-avatar"><UserRound size={20} /></div><div><strong>{item.name}</strong><span>{contactType(item.type)}</span><small>{item.phone || 'شماره ثبت نشده'}</small></div><ArrowLeft size={16} /></button>)}{!contacts.length && <EmptyState icon={UsersRound} text="شخصی ثبت نشده است" />}</div></section>
 }
 
 function contactType(type) { return { customer: 'مشتری', investor: 'سرمایه‌گذار', company: 'شرکت / صندوق' }[type] || 'طرف حساب' }
@@ -449,7 +483,7 @@ function Installments({ installments, onRefresh }) {
 }
 
 function Investors({ investors, onOpen }) {
-  return <section className="panel page-panel"><PanelHeader title="سرمایه‌گذاران" action={<button className="primary-button small" onClick={() => onOpen('investor')}><Plus size={16} /> سرمایه‌گذار جدید</button>} /><div className="investor-grid">{investors.map((item) => <div className="investor-card" key={item.id}><div className="investor-card-top"><span className="investor-icon"><CircleDollarSign size={19} /></span><StatusBadge status={item.status} /></div><strong>{item.name}</strong><small>اصل سرمایه</small><b>{money(item.principal_rial)}</b><div className="investor-meta"><span>نرخ توافقی</span><strong>{faNumber.format(item.rate_percent)}٪ ماهانه</strong></div></div>)}</div></section>
+  return <section className="panel page-panel"><PanelHeader title="سرمایه‌گذاران" action={<button className="primary-button small" onClick={() => onOpen('investor')}><Plus size={16} /> سرمایه‌گذار جدید</button>} /><div className="investor-grid">{investors.map((item) => <article className="investor-card" key={item.id}><div className="investor-card-top"><span className="investor-icon"><CircleDollarSign size={19} /></span><StatusBadge status={item.status} /></div><strong>{item.name}</strong><small>اصل سرمایه</small><b>{money(item.principal_rial)}</b><div className="investor-meta"><span>نرخ توافقی</span><strong>{faNumber.format(item.rate_percent)}٪ ماهانه</strong></div><div className="investor-actions"><button type="button" className="secondary-button small" onClick={() => onOpen('investor', item)}>ویرایش سرمایه‌گذار</button></div></article>)}</div></section>
 }
 
 function Reports({ dashboard, records }) {
@@ -462,15 +496,22 @@ function ReportBar({ label, value, max, tone }) { return <div className="report-
 function Insight({ icon: Icon, tone, title, text }) { return <div className="insight"><span className={`insight-icon ${tone}`}><Icon size={17} /></span><div><strong>{title}</strong><p>{text}</p></div></div> }
 function EmptyState({ icon: Icon, text }) { return <div className="empty-state"><Icon size={25} /><span>{text}</span></div> }
 
-function Modal({ type, onClose, onSubmit }) {
+function modalDefaults(type, record) {
+  const defaults = type === 'transaction' ? { date: today, direction: 'in', category: 'installment', description: '', counterparty: '', amount_rial: '', status: 'settled', reference: '' } : type === 'check' ? { holder: '', issuer: '', amount_rial: '', due_date: today, direction: 'receivable', check_number: '', serial: '', owner: 'خودم', status: 'in_road', notes: '' } : type === 'contact' ? { name: '', type: 'customer', phone: '', national_id: '', notes: '' } : type === 'vehicle' ? { title: '', plate: '', vin: '', model_year: '', status: 'available', value_rial: '', customer_id: null, notes: '' } : { name: '', principal_rial: '', rate_percent: '4.5', status: 'active', notes: '' }
+  const value = { ...defaults, ...(record || {}) }
+  if (type === 'investor') value.rate_percent = String(record?.rate_percent ?? defaults.rate_percent)
+  return value
+}
+
+function Modal({ type, record, onClose, onSubmit }) {
   const configs = {
     transaction: { title: 'ثبت تراکنش جدید', submit: 'ثبت تراکنش' },
     check: { title: 'ثبت چک جدید', submit: 'ثبت چک' },
     contact: { title: 'ثبت شخص جدید', submit: 'ثبت شخص' },
     vehicle: { title: 'ثبت خودرو جدید', submit: 'ثبت خودرو' },
-    investor: { title: 'ثبت سرمایه‌گذار جدید', submit: 'ثبت سرمایه‌گذار' },
+    investor: { title: record ? 'ویرایش سرمایه‌گذار' : 'ثبت سرمایه‌گذار جدید', submit: record ? 'ذخیره تغییرات' : 'ثبت سرمایه‌گذار' },
   }
-  const [form, setForm] = useState(type === 'transaction' ? { date: today, direction: 'in', category: 'installment', description: '', counterparty: '', amount_rial: '', status: 'settled', reference: '' } : type === 'check' ? { holder: '', issuer: '', amount_rial: '', due_date: today, direction: 'receivable', check_number: '', serial: '', owner: 'خودم', status: 'in_road', notes: '' } : type === 'contact' ? { name: '', type: 'customer', phone: '', national_id: '', notes: '' } : type === 'vehicle' ? { title: '', plate: '', model_year: '', status: 'available', value_rial: '', notes: '' } : { name: '', principal_rial: '', rate_percent: '۴.۵', status: 'active', notes: '' })
+  const [form, setForm] = useState(() => modalDefaults(type, record))
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const submit = (event) => { event.preventDefault(); onSubmit(form) }
   return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><div className="modal"><div className="modal-head"><div><span className="modal-kicker">فرم ثبت اطلاعات</span><h2>{configs[type].title}</h2></div><button onClick={onClose} className="modal-close" aria-label="بستن"><X size={19} /></button></div><form onSubmit={submit}><div className="form-grid">
@@ -478,11 +519,30 @@ function Modal({ type, onClose, onSubmit }) {
     {type === 'check' && <><Field label="دارنده چک" value={form.holder} onChange={(v) => update('holder', v)} required /><Field label="صادرکننده" value={form.issuer} onChange={(v) => update('issuer', v)} required /><Field label="مبلغ (ریال)" type="number" value={form.amount_rial} onChange={(v) => update('amount_rial', v)} required /><Field label="تاریخ سررسید" value={form.due_date} onChange={(v) => update('due_date', v)} required /><SelectField label="نوع چک" value={form.direction} onChange={(v) => update('direction', v)} options={[["receivable", "دریافتی"], ["payable", "پرداختی"]]} /><Field label="شماره چک" value={form.check_number} onChange={(v) => update('check_number', v)} /><Field label="سریال" value={form.serial} onChange={(v) => update('serial', v)} /><Field label="یادداشت" value={form.notes} onChange={(v) => update('notes', v)} full /></>}
     {type === 'contact' && <><Field label="نام و نام خانوادگی / شرکت" value={form.name} onChange={(v) => update('name', v)} required full /><SelectField label="نوع شخص" value={form.type} onChange={(v) => update('type', v)} options={[["customer", "مشتری"], ["investor", "سرمایه‌گذار"], ["company", "شرکت / صندوق"]]} /><Field label="شماره تماس" value={form.phone} onChange={(v) => update('phone', v)} /><Field label="شناسه ملی / کد ملی" value={form.national_id} onChange={(v) => update('national_id', v)} /><Field label="یادداشت" value={form.notes} onChange={(v) => update('notes', v)} full /></>}
     {type === 'vehicle' && <><Field label="عنوان خودرو" value={form.title} onChange={(v) => update('title', v)} required full /><Field label="پلاک" value={form.plate} onChange={(v) => update('plate', v)} /><Field label="مدل" type="number" value={form.model_year} onChange={(v) => update('model_year', v)} /><Field label="ارزش ثبت‌شده (ریال)" type="number" value={form.value_rial} onChange={(v) => update('value_rial', v)} /><SelectField label="وضعیت" value={form.status} onChange={(v) => update('status', v)} options={[["available", "آزاد"], ["leased", "در قرارداد"], ["sold", "فروخته‌شده"]]} /><Field label="یادداشت" value={form.notes} onChange={(v) => update('notes', v)} full /></>}
-    {type === 'investor' && <><Field label="نام سرمایه‌گذار" value={form.name} onChange={(v) => update('name', v)} required full /><Field label="اصل سرمایه (ریال)" type="number" value={form.principal_rial} onChange={(v) => update('principal_rial', v)} /><Field label="نرخ توافقی ماهانه (٪)" value={form.rate_percent} onChange={(v) => update('rate_percent', v)} /><Field label="یادداشت" value={form.notes} onChange={(v) => update('notes', v)} full /></>}
+    {type === 'investor' && <><Field label="نام سرمایه‌گذار" value={form.name} onChange={(v) => update('name', v)} required full /><Field label="اصل سرمایه (ریال)" type="number" value={form.principal_rial} onChange={(v) => update('principal_rial', v)} /><Field label="نرخ توافقی ماهانه (٪)" type="number" step="0.1" value={form.rate_percent} onChange={(v) => update('rate_percent', v)} /><SelectField label="وضعیت" value={form.status} onChange={(v) => update('status', v)} options={[["active", "فعال"], ["closed", "تسویه‌شده"], ["overdue", "معوق"]]} /><Field label="یادداشت" value={form.notes} onChange={(v) => update('notes', v)} full /></>}
     </div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>انصراف</button><button type="submit" className="primary-button">{configs[type].submit} <ArrowLeft size={16} /></button></div></form></div></div>
 }
 
-function Field({ label, value, onChange, type = 'text', required = false, full = false }) { return <label className={`field ${full ? 'full' : ''}`}><span>{label}{required && ' *'}</span><input type={type} value={value} onChange={(event) => onChange(event.target.value)} required={required} /></label> }
+const dateOptions = [
+  { id: 'today', label: today },
+  { id: 'current-month', label: 'ماه جاری' },
+  { id: 'previous-month', label: 'ماه قبل' },
+]
+
+function DateMenu({ selected, onSelect }) {
+  return <div className="date-menu" role="menu" aria-label="انتخاب بازه تاریخ"><span className="date-menu-title">بازه نمایش</span>{dateOptions.map((option) => <button type="button" role="menuitem" key={option.id} className={`date-option ${selected === option.id ? 'selected' : ''}`} onClick={() => onSelect(option)}><span>{option.label}</span>{selected === option.id && <Check size={15} />}</button>)}</div>
+}
+
+function ContactProfile({ contact, onClose, onEdit }) {
+  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="modal profile-modal" role="dialog" aria-modal="true" aria-labelledby="contact-profile-title"><div className="modal-head"><div><span className="modal-kicker">پروفایل طرف حساب</span><h2 id="contact-profile-title">{contact.name}</h2></div><button onClick={onClose} className="modal-close" aria-label="بستن"><X size={19} /></button></div><div className="profile-summary"><div className="profile-avatar"><UserRound size={25} /></div><div><strong>{contact.name}</strong><span>{contactType(contact.type)}</span></div></div><div className="profile-grid"><div><span>نوع شخص</span><strong>{contactType(contact.type)}</strong></div><div><span>شماره تماس</span><strong>{contact.phone || 'ثبت نشده'}</strong></div><div><span>کد ملی / شناسه ملی</span><strong>{contact.national_id || 'ثبت نشده'}</strong></div><div><span>یادداشت</span><strong>{contact.notes || 'یادداشتی ثبت نشده است'}</strong></div></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>بستن</button><button type="button" className="primary-button" onClick={onEdit}>ویرایش اطلاعات <ArrowLeft size={16} /></button></div></section></div>
+}
+
+function SettingsPanel({ theme, onThemeChange, onClose }) {
+  const dark = theme === 'dark'
+  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="modal settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div className="modal-head"><div><span className="modal-kicker">تنظیمات محیط</span><h2 id="settings-title">تنظیمات حسابیار</h2></div><button onClick={onClose} className="modal-close" aria-label="بستن"><X size={19} /></button></div><div className="settings-list"><div className="settings-row"><div><strong>تم شب</strong><span>برای استفاده راحت‌تر در نور کم</span></div><button type="button" className={`theme-toggle ${dark ? 'on' : ''}`} aria-pressed={dark} onClick={() => onThemeChange(dark ? 'light' : 'dark')}><span className="toggle-knob" />{dark ? 'فعال' : 'خاموش'}</button></div><div className="settings-row"><div><strong>ذخیره‌سازی آزمایشی</strong><span>اطلاعات این نسخه در حافظه همین مرورگر نگهداری می‌شود.</span></div><span className="settings-value">localStorage</span></div></div><div className="modal-actions"><button type="button" className="primary-button" onClick={onClose}>تمام</button></div></section></div>
+}
+
+function Field({ label, value, onChange, type = 'text', step, required = false, full = false }) { return <label className={`field ${full ? 'full' : ''}`}><span>{label}{required && ' *'}</span><input type={type} step={step} value={value} onChange={(event) => onChange(event.target.value)} required={required} /></label> }
 function SelectField({ label, value, onChange, options }) { return <label className="field"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{options.map(([key, labelText]) => <option key={key} value={key}>{labelText}</option>)}</select></label> }
 
 export default App
