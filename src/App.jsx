@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownLeft,
   ArrowLeft,
@@ -52,6 +52,16 @@ const faNumber = new Intl.NumberFormat('fa-IR')
 const faCompact = new Intl.NumberFormat('fa-IR', { notation: 'compact', maximumFractionDigits: 1 })
 const money = (value, compact = false) => `${(compact ? faCompact : faNumber).format(Math.round(Number(value || 0)))} ریال`
 const dateLabel = (value) => String(value || '').replaceAll('-', '/')
+const persianDigits = '۰۱۲۳۴۵۶۷۸۹'
+const arabicDigits = '٠١٢٣٤٥٦٧٨٩'
+const numericDigits = (value) => String(value ?? '').replace(/[۰-۹]/g, (digit) => String(persianDigits.indexOf(digit))).replace(/[٠-٩]/g, (digit) => String(arabicDigits.indexOf(digit))).replace(/[^0-9]/g, '')
+const formatIntegerInput = (value) => {
+  const digits = numericDigits(value)
+  if (!digits) return ''
+  const trimmed = digits.replace(/^0+(?=\d)/, '')
+  const grouped = trimmed.replace(/\B(?=(\d{3})+(?!\d))/g, '٬')
+  return grouped.replace(/\d/g, (digit) => persianDigits[digit])
+}
 const today = '۱۴۰۵/۰۶/۰۹'
 const themeStorageKey = 'hesabyar-aria-theme-v1'
 const getInitialTheme = () => {
@@ -199,11 +209,15 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [dateOpen, setDateOpen] = useState(false)
   const [dateContext, setDateContext] = useState({ id: 'today', label: today })
+  const [dateMenuStyle, setDateMenuStyle] = useState(null)
   const [theme, setTheme] = useState(getInitialTheme)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [notice, setNotice] = useState(null)
   const [search, setSearch] = useState('')
   const [auth, setAuth] = useState({ loading: true, required: false, locked: false, authenticated: false })
+  const dateButtonRef = useRef(null)
 
   const refresh = async () => {
     setLoading(true)
@@ -236,8 +250,27 @@ function App() {
   }, [])
 
   const currentTitle = navItems.find((item) => item.id === active)?.label || 'داشبورد'
-  const go = (id) => { setActive(id); setMobileOpen(false) }
+  const go = (id) => { setActive(id); setMobileOpen(false); setDateOpen(false); setNotificationsOpen(false); setUserMenuOpen(false) }
   const openModal = (type, record = null) => setModal({ type, record })
+  const toggleDateMenu = () => {
+    setNotificationsOpen(false)
+    setUserMenuOpen(false)
+    if (dateOpen) {
+      setDateOpen(false)
+      return
+    }
+    const rect = dateButtonRef.current?.getBoundingClientRect()
+    if (rect) {
+      const menuWidth = Math.min(220, Math.max(185, window.innerWidth - 32))
+      const menuHeight = 150
+      const left = Math.min(Math.max(16, rect.right - menuWidth), window.innerWidth - menuWidth - 16)
+      const top = rect.bottom + 8 + menuHeight <= window.innerHeight - 16 ? rect.bottom + 8 : Math.max(16, rect.top - menuHeight - 8)
+      setDateMenuStyle({ top, left, width: menuWidth, right: 'auto' })
+    }
+    setDateOpen(true)
+  }
+  const toggleNotifications = () => { setDateOpen(false); setUserMenuOpen(false); setNotificationsOpen((open) => !open) }
+  const toggleUserMenu = () => { setDateOpen(false); setNotificationsOpen(false); setUserMenuOpen((open) => !open) }
   const submitModal = async (payload) => {
     try {
       const type = modal.type
@@ -293,10 +326,11 @@ function App() {
           <small>واحد مرجع: ریال</small>
         </div>
       </aside>
+      {mobileOpen && <button type="button" className="sidebar-backdrop" aria-label="بستن منو" onClick={() => setMobileOpen(false)} />}
 
       <main className="main-content">
         <header className="topbar">
-          <button className="mobile-menu" onClick={() => setMobileOpen((open) => !open)} aria-label="بازکردن منو"><Menu size={22} /></button>
+          <button className="mobile-menu" onClick={() => { setMobileOpen((open) => !open); setNotificationsOpen(false); setUserMenuOpen(false) }} aria-label={mobileOpen ? 'بستن منو' : 'بازکردن منو'} aria-expanded={mobileOpen}>{mobileOpen ? <X size={22} /> : <Menu size={22} />}</button>
           <div className="topbar-context">
             <span className="topbar-kicker">فضای کاری شخصی</span>
             <span className="topbar-title">{currentTitle}</span>
@@ -306,8 +340,14 @@ function App() {
               <Search size={17} />
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="جست‌وجو در حسابیار آریا..." />
             </label>
-            <button className="icon-button notification-button" aria-label="اعلان‌ها"><Bell size={19} /><span>۴</span></button>
-            <button className="avatar-button">ع</button>
+            <div className="notification-wrap">
+              <button className="icon-button notification-button" aria-label="اعلان‌ها" aria-expanded={notificationsOpen} aria-controls="notifications-menu" onClick={toggleNotifications}><Bell size={19} /><span>۴</span></button>
+              {notificationsOpen && <NotificationMenu records={records} />}
+            </div>
+            <div className="user-menu-wrap">
+              <button className="avatar-button" aria-label="پروفایل کاربری" aria-expanded={userMenuOpen} aria-controls="user-menu" onClick={toggleUserMenu}>ع</button>
+              {userMenuOpen && <UserMenu />}
+            </div>
           </div>
         </header>
 
@@ -320,8 +360,8 @@ function App() {
             </div>
             <div className="heading-actions">
               <div className="date-picker-wrap">
-                <button className="date-control" aria-expanded={dateOpen} onClick={() => setDateOpen((open) => !open)}><CalendarDays size={16} /> {dateContext.label} <ChevronDown size={15} /></button>
-                {dateOpen && <DateMenu selected={dateContext.id} onSelect={(option) => { setDateContext(option); setDateOpen(false); setNotice({ type: 'success', message: `بازهٔ ${option.label} انتخاب شد.` }) }} />}
+                <button ref={dateButtonRef} className="date-control" aria-expanded={dateOpen} aria-controls="date-menu" onClick={toggleDateMenu}><CalendarDays size={16} /> {dateContext.label} <ChevronDown size={15} /></button>
+                {dateOpen && <DateMenu selected={dateContext.id} style={dateMenuStyle} onSelect={(option) => { setDateContext(option); setDateOpen(false); setDateMenuStyle(null); setNotice({ type: 'success', message: `بازهٔ ${option.label} انتخاب شد.` }) }} />}
               </div>
               <button className="primary-button" onClick={() => openModal('transaction')}><Plus size={18} /> ثبت تراکنش</button>
             </div>
@@ -519,7 +559,7 @@ function Modal({ type, record, onClose, onSubmit }) {
     {type === 'check' && <><Field label="دارنده چک" value={form.holder} onChange={(v) => update('holder', v)} required /><Field label="صادرکننده" value={form.issuer} onChange={(v) => update('issuer', v)} required /><Field label="مبلغ (ریال)" type="number" value={form.amount_rial} onChange={(v) => update('amount_rial', v)} required /><Field label="تاریخ سررسید" value={form.due_date} onChange={(v) => update('due_date', v)} required /><SelectField label="نوع چک" value={form.direction} onChange={(v) => update('direction', v)} options={[["receivable", "دریافتی"], ["payable", "پرداختی"]]} /><Field label="شماره چک" value={form.check_number} onChange={(v) => update('check_number', v)} /><Field label="سریال" value={form.serial} onChange={(v) => update('serial', v)} /><Field label="یادداشت" value={form.notes} onChange={(v) => update('notes', v)} full /></>}
     {type === 'contact' && <><Field label="نام و نام خانوادگی / شرکت" value={form.name} onChange={(v) => update('name', v)} required full /><SelectField label="نوع شخص" value={form.type} onChange={(v) => update('type', v)} options={[["customer", "مشتری"], ["investor", "سرمایه‌گذار"], ["company", "شرکت / صندوق"]]} /><Field label="شماره تماس" value={form.phone} onChange={(v) => update('phone', v)} /><Field label="شناسه ملی / کد ملی" value={form.national_id} onChange={(v) => update('national_id', v)} /><Field label="یادداشت" value={form.notes} onChange={(v) => update('notes', v)} full /></>}
     {type === 'vehicle' && <><Field label="عنوان خودرو" value={form.title} onChange={(v) => update('title', v)} required full /><Field label="پلاک" value={form.plate} onChange={(v) => update('plate', v)} /><Field label="مدل" type="number" value={form.model_year} onChange={(v) => update('model_year', v)} /><Field label="ارزش ثبت‌شده (ریال)" type="number" value={form.value_rial} onChange={(v) => update('value_rial', v)} /><SelectField label="وضعیت" value={form.status} onChange={(v) => update('status', v)} options={[["available", "آزاد"], ["leased", "در قرارداد"], ["sold", "فروخته‌شده"]]} /><Field label="یادداشت" value={form.notes} onChange={(v) => update('notes', v)} full /></>}
-    {type === 'investor' && <><Field label="نام سرمایه‌گذار" value={form.name} onChange={(v) => update('name', v)} required full /><Field label="اصل سرمایه (ریال)" type="number" value={form.principal_rial} onChange={(v) => update('principal_rial', v)} /><Field label="نرخ توافقی ماهانه (٪)" type="number" step="0.1" value={form.rate_percent} onChange={(v) => update('rate_percent', v)} /><SelectField label="وضعیت" value={form.status} onChange={(v) => update('status', v)} options={[["active", "فعال"], ["closed", "تسویه‌شده"], ["overdue", "معوق"]]} /><Field label="یادداشت" value={form.notes} onChange={(v) => update('notes', v)} full /></>}
+    {type === 'investor' && <><Field label="نام سرمایه‌گذار" value={form.name} onChange={(v) => update('name', v)} required full /><Field label="اصل سرمایه (ریال)" numeric value={form.principal_rial} onChange={(v) => update('principal_rial', v)} /><Field label="نرخ توافقی ماهانه (٪)" type="number" step="0.1" value={form.rate_percent} onChange={(v) => update('rate_percent', v)} /><SelectField label="وضعیت" value={form.status} onChange={(v) => update('status', v)} options={[["active", "فعال"], ["closed", "تسویه‌شده"], ["overdue", "معوق"]]} /><Field label="یادداشت" value={form.notes} onChange={(v) => update('notes', v)} full /></>}
     </div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>انصراف</button><button type="submit" className="primary-button">{configs[type].submit} <ArrowLeft size={16} /></button></div></form></div></div>
 }
 
@@ -529,8 +569,28 @@ const dateOptions = [
   { id: 'previous-month', label: 'ماه قبل' },
 ]
 
-function DateMenu({ selected, onSelect }) {
-  return <div className="date-menu" role="menu" aria-label="انتخاب بازه تاریخ"><span className="date-menu-title">بازه نمایش</span>{dateOptions.map((option) => <button type="button" role="menuitem" key={option.id} className={`date-option ${selected === option.id ? 'selected' : ''}`} onClick={() => onSelect(option)}><span>{option.label}</span>{selected === option.id && <Check size={15} />}</button>)}</div>
+function DateMenu({ selected, onSelect, style }) {
+  return <div id="date-menu" className="date-menu" style={style || undefined} role="menu" aria-label="انتخاب بازه تاریخ"><span className="date-menu-title">بازه نمایش</span>{dateOptions.map((option) => <button type="button" role="menuitem" key={option.id} className={`date-option ${selected === option.id ? 'selected' : ''}`} onClick={() => onSelect(option)}><span>{option.label}</span>{selected === option.id && <Check size={15} />}</button>)}</div>
+}
+
+function NotificationMenu({ records }) {
+  const pendingChecks = records.checks.filter((item) => !['settled', 'cancelled'].includes(item.status)).length
+  const pendingInstallments = records.installments.filter((item) => item.status !== 'paid').length
+  return <div id="notifications-menu" className="notification-menu" role="menu" aria-label="اعلان‌های حسابیار">
+    <div className="popover-head"><div><strong>اعلان‌های حسابیار</strong><span>مواردی که نیاز به پیگیری دارند</span></div><b>۴</b></div>
+    <div className="notification-list">
+      <div className="notification-item" role="menuitem"><span className="notification-dot warning" /><div><strong>سررسیدهای نزدیک</strong><span>{faNumber.format(pendingChecks)} چک در صف بررسی است.</span></div></div>
+      <div className="notification-item" role="menuitem"><span className="notification-dot info" /><div><strong>اقساط در انتظار وصول</strong><span>{faNumber.format(pendingInstallments)} قسط باید پیگیری شود.</span></div></div>
+      <div className="notification-item" role="menuitem"><span className="notification-dot success" /><div><strong>پایگاه محلی فعال است</strong><span>اطلاعات این نسخه در همین مرورگر ذخیره می‌شود.</span></div></div>
+    </div>
+  </div>
+}
+
+function UserMenu() {
+  return <div id="user-menu" className="user-menu" role="menu" aria-label="پروفایل کاربری">
+    <div className="user-menu-head"><div className="user-menu-avatar">ع</div><div><strong>پروفایل کاربری</strong><span>حسابیار آریا</span></div></div>
+    <div className="user-menu-note">این نسخه آزمایشی بدون ورود جداگانه اجرا می‌شود.</div>
+  </div>
 }
 
 function ContactProfile({ contact, onClose, onEdit }) {
@@ -542,7 +602,7 @@ function SettingsPanel({ theme, onThemeChange, onClose }) {
   return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="modal settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div className="modal-head"><div><span className="modal-kicker">تنظیمات محیط</span><h2 id="settings-title">تنظیمات حسابیار</h2></div><button onClick={onClose} className="modal-close" aria-label="بستن"><X size={19} /></button></div><div className="settings-list"><div className="settings-row"><div><strong>تم شب</strong><span>برای استفاده راحت‌تر در نور کم</span></div><button type="button" className={`theme-toggle ${dark ? 'on' : ''}`} aria-pressed={dark} onClick={() => onThemeChange(dark ? 'light' : 'dark')}><span className="toggle-knob" />{dark ? 'فعال' : 'خاموش'}</button></div><div className="settings-row"><div><strong>ذخیره‌سازی آزمایشی</strong><span>اطلاعات این نسخه در حافظه همین مرورگر نگهداری می‌شود.</span></div><span className="settings-value">localStorage</span></div></div><div className="modal-actions"><button type="button" className="primary-button" onClick={onClose}>تمام</button></div></section></div>
 }
 
-function Field({ label, value, onChange, type = 'text', step, required = false, full = false }) { return <label className={`field ${full ? 'full' : ''}`}><span>{label}{required && ' *'}</span><input type={type} step={step} value={value} onChange={(event) => onChange(event.target.value)} required={required} /></label> }
+function Field({ label, value, onChange, type = 'text', step, numeric = false, required = false, full = false }) { return <label className={`field ${full ? 'full' : ''}`}><span>{label}{required && ' *'}</span><input type={numeric ? 'text' : type} inputMode={numeric ? 'numeric' : undefined} step={numeric ? undefined : step} value={numeric ? formatIntegerInput(value) : value} onChange={(event) => onChange(numeric ? numericDigits(event.target.value) : event.target.value)} required={required} /></label> }
 function SelectField({ label, value, onChange, options }) { return <label className="field"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{options.map(([key, labelText]) => <option key={key} value={key}>{labelText}</option>)}</select></label> }
 
 export default App
